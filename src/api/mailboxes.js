@@ -91,8 +91,11 @@ export async function handleMailboxesApi(request, db, mailDomains, url, path, op
     // 支持自定义域名参数（用于子域名邮箱生成，如 domain=red.599.chat）
     const customDomain = url.searchParams.get('domain');
     let chosenDomain;
-    
-    if (customDomain && isValidDomain(customDomain, mailDomains)) {
+
+    if (customDomain) {
+      if (!isValidDomain(customDomain, mailDomains)) {
+        return errorResponse('非法域名', 400);
+      }
       chosenDomain = customDomain.trim().toLowerCase();
     } else {
       const domainStrings = isMock ? MOCK_DOMAINS : getDomainStrings(mailDomains);
@@ -143,8 +146,11 @@ export async function handleMailboxesApi(request, db, mailDomains, url, path, op
       // 支持自定义域名参数（用于子域名邮箱创建，如 domain=red.599.chat）
       const customDomain = body.domain;
       let chosenDomain;
-      
-      if (customDomain && isValidDomain(customDomain, mailDomains)) {
+
+      if (customDomain) {
+        if (!isValidDomain(customDomain, mailDomains)) {
+          return errorResponse('非法域名', 400);
+        }
         chosenDomain = String(customDomain).trim().toLowerCase();
       } else {
         const domainStrings = getDomainStrings(mailDomains);
