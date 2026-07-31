@@ -227,9 +227,11 @@ async function loadDomainsFilter() {
   try {
     const domains = await fetchDomains();
     if (Array.isArray(domains) && domains.length) {
-      availableDomains = domains.sort();
+      // 兼容字符串和对象两种域名格式
+      const domainStrings = domains.map(d => typeof d === 'string' ? d : (d.domain || '')).filter(Boolean);
+      availableDomains = domainStrings.sort();
       if (els.domainFilter) {
-        els.domainFilter.innerHTML = '<option value="">全部域名</option>' + domains.map(d => `<option value="${d}">@${d}</option>`).join('');
+        els.domainFilter.innerHTML = '<option value="">全部域名</option>' + domainStrings.map(d => `<option value="${d}">@${d}</option>`).join('');
       }
     }
   } catch(_) {}

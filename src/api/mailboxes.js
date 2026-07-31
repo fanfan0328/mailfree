@@ -16,10 +16,55 @@ import {
 import { handleMailboxAdminApi } from './mailboxAdmin.js';
 
 /**
+ * 将 mailDomains 规范化为对象数组格式
+ * 兼容旧的字符串数组格式
+ * @param {Array|string} mailDomains - 域名列表（对象数组或字符串数组或单个字符串）
+ * @returns {Array<{domain:string, wildcard:boolean}>}
+ */
+function normalizeDomains(mailDomains) {
+  if (!Array.isArray(mailDomains)) {
+    return [{ domain: String(mailDomains || 'temp.example.com').toLowerCase(), wildcard: false }];
+  }
+  return mailDomains.map(d => {
+    if (typeof d === 'string') {
+      return { domain: d.toLowerCase(), wildcard: false };
+    }
+    return { domain: String(d.domain || '').toLowerCase(), wildcard: !!d.wildcard };
+  }).filter(d => d.domain);
+}
+
+/**
+ * 获取域名字符串列表（用于下拉框等）
+ * @param {Array|string} mailDomains - 域名列表
+ * @returns {Array<string>}
+ */
+function getDomainStrings(mailDomains) {
+  return normalizeDomains(mailDomains).map(d => d.domain);
+}
+
+/**
+ * 验证域名是否合法（在允许的域名列表中，或是通配域名的子域名）
+ * @param {string} domain - 待验证的域名
+ * @param {Array|string} mailDomains - 域名列表
+ * @returns {boolean}
+ */
+function isValidDomain(domain, mailDomains) {
+  const d = String(domain || '').trim().toLowerCase();
+  if (!d || !/^[a-z0-9.-]+$/.test(d)) return false;
+  const domains = normalizeDomains(mailDomains);
+  for (const entry of domains) {
+    if (d === entry.domain) return true;
+    // 通配域名：允许任意子域名（如 *.599.chat 允许 red.599.chat, x.599.chat 等）
+    if (entry.wildcard && d.endsWith('.' + entry.domain)) return true;
+  }
+  return false;
+}
+
+/**
  * 处理邮箱管理相关 API
  * @param {Request} request - HTTP 请求
  * @param {object} db - 数据库连接
- * @param {Array<string>} mailDomains - 邮件域名列表
+ * @param {Array} mailDomains - 邮件域名列表（支持字符串数组或 {domain, wildcard} 对象数组）
  * @param {URL} url - 请求 URL
  * @param {string} path - 请求路径
  * @param {object} options - 选项
@@ -28,10 +73,13 @@ import { handleMailboxAdminApi } from './mailboxAdmin.js';
 export async function handleMailboxesApi(request, db, mailDomains, url, path, options) {
   const isMock = !!options.mockOnly;
 
-  // 返回域名列表给前端
+  // 返回域名列表给前端（包含通配符信息）
   if (path === '/api/domains' && request.method === 'GET') {
-    if (isMock) return Response.json(MOCK_DOMAINS);
-    const domains = Array.isArray(mailDomains) ? mailDomains : [(mailDomains || 'temp.example.com')];
+    if (isMock) {
+      // 演示模式返回字符串数组（向后兼容）
+      return Response.json(MOCK_DOMAINS);
+    }
+    const domains = normalizeDomains(mailDomains);
     return Response.json(domains);
   }
 
@@ -39,9 +87,19 @@ export async function handleMailboxesApi(request, db, mailDomains, url, path, op
   if (path === '/api/generate') {
     const lengthParam = Number(url.searchParams.get('length') || 0);
     const randomId = generateRandomId(lengthParam || undefined);
-    const domains = isMock ? MOCK_DOMAINS : (Array.isArray(mailDomains) ? mailDomains : [(mailDomains || 'temp.example.com')]);
-    const domainIdx = Math.max(0, Math.min(domains.length - 1, Number(url.searchParams.get('domainIndex') || 0)));
-    const chosenDomain = domains[domainIdx] || domains[0];
+    
+    // 支持自定义域名参数（用于子域名邮箱生成，如 domain=red.599.chat）
+    const customDomain = url.searchParams.get('domain');
+    let chosenDomain;
+    
+    if (customDomain && isValidDomain(customDomain, mailDomains)) {
+      chosenDomain = customDomain.trim().toLowerCase();
+    } else {
+      const domainStrings = isMock ? MOCK_DOMAINS : getDomainStrings(mailDomains);
+      const domainIdx = Math.max(0, Math.min(domainStrings.length - 1, Number(url.searchParams.get('domainIndex') || 0)));
+      chosenDomain = domainStrings[domainIdx] || domainStrings[0];
+    }
+    
     const email = `${randomId}@${chosenDomain}`;
     
     if (!isMock) {
@@ -81,9 +139,19 @@ export async function handleMailboxesApi(request, db, mailDomains, url, path, op
       const local = String(body.local || '').trim().toLowerCase();
       const valid = /^[a-z0-9._-]{1,64}$/i.test(local);
       if (!valid) return errorResponse('非法用户名', 400);
-      const domains = Array.isArray(mailDomains) ? mailDomains : [(mailDomains || 'temp.example.com')];
-      const domainIdx = Math.max(0, Math.min(domains.length - 1, Number(body.domainIndex || 0)));
-      const chosenDomain = domains[domainIdx] || domains[0];
+      
+      // 支持自定义域名参数（用于子域名邮箱创建，如 domain=red.599.chat）
+      const customDomain = body.domain;
+      let chosenDomain;
+      
+      if (customDomain && isValidDomain(customDomain, mailDomains)) {
+        chosenDomain = String(customDomain).trim().toLowerCase();
+      } else {
+        const domainStrings = getDomainStrings(mailDomains);
+        const domainIdx = Math.max(0, Math.min(domainStrings.length - 1, Number(body.domainIndex || 0)));
+        chosenDomain = domainStrings[domainIdx] || domainStrings[0];
+      }
+      
       const email = `${local}@${chosenDomain}`;
       
       try {

@@ -12,7 +12,8 @@ let domains = [];
 // 存储键
 export const STORAGE_KEYS = {
   domain: 'mailfree:lastDomain',
-  length: 'mailfree:lastLen'
+  length: 'mailfree:lastLen',
+  subdomain: 'mailfree:lastSubdomain'
 };
 
 /**
@@ -32,6 +33,18 @@ export function setDomains(list) {
 }
 
 /**
+ * 规范化域名为统一对象格式
+ * @param {*} d - 域名项（字符串或对象）
+ * @returns {{domain:string, wildcard:boolean}}
+ */
+function normalizeDomainEntry(d) {
+  if (typeof d === 'string') {
+    return { domain: d, wildcard: false };
+  }
+  return { domain: d.domain || '', wildcard: !!d.wildcard };
+}
+
+/**
  * 填充域名下拉框
  * @param {Array} domainList - 域名列表
  * @param {HTMLSelectElement} selectElement - 下拉框元素
@@ -39,18 +52,58 @@ export function setDomains(list) {
 export function populateDomains(domainList, selectElement) {
   if (!selectElement) return;
   const list = Array.isArray(domainList) ? domainList : [];
-  selectElement.innerHTML = list.map((d, i) => `<option value="${i}">${d}</option>`).join('');
+  // 兼容字符串数组和对象数组
+  setDomains(list.map(normalizeDomainEntry));
+  
+  selectElement.innerHTML = list.map((d, i) => {
+    const entry = normalizeDomainEntry(d);
+    const label = entry.wildcard ? `*.${entry.domain}` : entry.domain;
+    return `<option value="${i}" data-wildcard="${entry.wildcard}">${label}</option>`;
+  }).join('');
   
   const stored = localStorage.getItem(STORAGE_KEYS.domain) || '';
-  const idx = stored ? list.indexOf(stored) : -1;
+  const idx = stored ? list.findIndex(d => normalizeDomainEntry(d).domain === stored) : -1;
   selectElement.selectedIndex = idx >= 0 ? idx : 0;
   
   selectElement.addEventListener('change', () => {
     const opt = selectElement.options[selectElement.selectedIndex];
-    if (opt) localStorage.setItem(STORAGE_KEYS.domain, opt.textContent || '');
+    if (opt) {
+      const entry = normalizeDomainEntry(list[selectElement.selectedIndex]);
+      localStorage.setItem(STORAGE_KEYS.domain, entry.domain);
+      updateSubdomainInputVisibility(selectElement, list);
+    }
   }, { once: true });
   
-  setDomains(list);
+  // 初始检查子域名输入框可见性
+  updateSubdomainInputVisibility(selectElement, list);
+}
+
+/**
+ * 根据当前选中的域名更新子域名输入框的可见性
+ * @param {HTMLSelectElement} selectElement - 下拉框元素
+ * @param {Array} list - 域名列表
+ */
+function updateSubdomainInputVisibility(selectElement, list) {
+  const subdomainInput = document.getElementById('subdomain-input');
+  if (!subdomainInput || !selectElement) return;
+  
+  const idx = selectElement.selectedIndex;
+  if (idx < 0 || idx >= list.length) {
+    subdomainInput.style.display = 'none';
+    return;
+  }
+  
+  const entry = normalizeDomainEntry(list[idx]);
+  subdomainInput.style.display = entry.wildcard ? 'block' : 'none';
+  
+  // 恢复上次输入的子域名
+  if (entry.wildcard) {
+    const stored = localStorage.getItem(STORAGE_KEYS.subdomain) || '';
+    subdomainInput.value = stored;
+    subdomainInput.oninput = () => {
+      localStorage.setItem(STORAGE_KEYS.subdomain, subdomainInput.value.trim());
+    };
+  }
 }
 
 /**
@@ -139,6 +192,28 @@ export function getSelectedDomainIndex(selectElement) {
 }
 
 /**
+ * 获取选中的完整域名（含子域名前缀，如有）
+ * @param {HTMLSelectElement} selectElement - 下拉框元素
+ * @returns {string} 完整域名，如 "red.599.chat" 或 "798.cc.cd"
+ */
+export function getSelectedDomain(selectElement) {
+  const list = getDomains();
+  const idx = getSelectedDomainIndex(selectElement);
+  const entry = list[idx] || list[0];
+  if (!entry) return '';
+  
+  const baseDomain = entry.domain;
+  if (entry.wildcard) {
+    const subdomainInput = document.getElementById('subdomain-input');
+    const sub = (subdomainInput?.value || '').trim().toLowerCase();
+    if (sub && /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(sub)) {
+      return `${sub}.${baseDomain}`;
+    }
+  }
+  return baseDomain;
+}
+
+/**
  * 更新范围滑块进度
  * @param {HTMLInputElement} input - 滑块元素
  */
@@ -159,6 +234,7 @@ export default {
   getStoredLength,
   saveLength,
   getSelectedDomainIndex,
+  getSelectedDomain,
   updateRangeProgress,
   STORAGE_KEYS
 };

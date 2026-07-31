@@ -113,18 +113,24 @@ export async function getDomains() {
  * 生成随机邮箱
  * @param {number} length - 长度
  * @param {number} domainIndex - 域名索引
+ * @param {string} [domain] - 自定义域名（用于子域名，如 red.599.chat）
  */
-export async function generateMailbox(length = 8, domainIndex = 0) {
-  return get(`/api/generate?length=${length}&domainIndex=${domainIndex}`);
+export async function generateMailbox(length = 8, domainIndex = 0, domain = '') {
+  let url = `/api/generate?length=${length}&domainIndex=${domainIndex}`;
+  if (domain) url += '&domain=' + encodeURIComponent(domain);
+  return get(url);
 }
 
 /**
  * 创建自定义邮箱
  * @param {string} local - 本地部分
  * @param {number} domainIndex - 域名索引
+ * @param {string} [domain] - 自定义域名（用于子域名，如 red.599.chat）
  */
-export async function createMailbox(local, domainIndex = 0) {
-  return post('/api/create', { local, domainIndex });
+export async function createMailbox(local, domainIndex = 0, domain = '') {
+  const body = { local, domainIndex };
+  if (domain) body.domain = domain;
+  return post('/api/create', body);
 }
 
 /**

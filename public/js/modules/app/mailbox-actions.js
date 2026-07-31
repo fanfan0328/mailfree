@@ -6,7 +6,7 @@
 import { setCurrentMailbox, getCurrentMailbox, clearCurrentMailbox, setCurrentMailboxInfo } from './mailbox-state.js';
 import { setButtonLoading, restoreButton } from './ui-helpers.js';
 import { generateRandomId } from './random-name.js';
-import { getStoredLength, saveLength, getSelectedDomainIndex } from './domains.js';
+import { getStoredLength, saveLength, getSelectedDomainIndex, getSelectedDomain } from './domains.js';
 import { startAutoRefresh, stopAutoRefresh } from './auto-refresh.js';
 import { resetPager } from './email-list.js';
 import { resetMbPage } from './mailbox-list.js';
@@ -29,8 +29,9 @@ export async function generateMailbox(elements, lenRange, domainSelect, api, sho
     setButtonLoading(gen, '生成中…');
     const len = Number(lenRange?.value || getStoredLength());
     const domainIndex = getSelectedDomainIndex(domainSelect);
+    const selectedDomain = getSelectedDomain(domainSelect);
     
-    const r = await api(`/api/generate?length=${len}&domainIndex=${domainIndex}`);
+    const r = await api(`/api/generate?length=${len}&domainIndex=${domainIndex}${selectedDomain ? '&domain=' + encodeURIComponent(selectedDomain) : ''}`);
     if (!r.ok) throw new Error(await r.text());
     
     const data = await r.json();
@@ -80,12 +81,13 @@ export async function generateNameMailbox(elements, lenRange, domainSelect, api,
     setButtonLoading(genName, '生成中…');
     const len = Number(lenRange?.value || getStoredLength());
     const domainIndex = getSelectedDomainIndex(domainSelect);
+    const selectedDomain = getSelectedDomain(domainSelect);
     const localName = generateRandomId(len);
     
     const r = await api('/api/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ local: localName, domainIndex })
+      body: JSON.stringify({ local: localName, domainIndex, ...(selectedDomain ? { domain: selectedDomain } : {}) })
     });
     
     if (!r.ok) throw new Error(await r.text());
@@ -136,11 +138,12 @@ export async function createCustomMailbox(elements, domainSelect, api, showToast
       return;
     }
     const domainIndex = getSelectedDomainIndex(domainSelect);
+    const selectedDomain = getSelectedDomain(domainSelect);
     
     const r = await api('/api/create', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ local, domainIndex })
+      body: JSON.stringify({ local, domainIndex, ...(selectedDomain ? { domain: selectedDomain } : {}) })
     });
     
     if (!r.ok) throw new Error(await r.text());
