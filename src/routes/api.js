@@ -31,7 +31,16 @@ router.all('/api/*', async (c) => {
   let DB;
   try { DB = await getInitializedDatabase(c.env); } catch (_) { return c.text('数据库连接失败', 500); }
 
-  const MAIL_DOMAINS = (c.env.MAIL_DOMAIN || 'temp.example.com').split(/[,\s]+/).map(d => d.trim()).filter(Boolean);
+  // 解析 MAIL_DOMAIN，支持通配符子域名（前缀 *. 表示允许子域名）
+  // 例如 "798.cc.cd,*.599.chat" 解析为：
+  //   [{domain:"798.cc.cd", wildcard:false}, {domain:"599.chat", wildcard:true}]
+  const rawDomains = (c.env.MAIL_DOMAIN || 'temp.example.com').split(/[,\s]+/).map(d => d.trim()).filter(Boolean);
+  const MAIL_DOMAINS = rawDomains.map(d => {
+    if (d.startsWith('*.')) {
+      return { domain: d.slice(2).toLowerCase(), wildcard: true };
+    }
+    return { domain: d.toLowerCase(), wildcard: false };
+  });
   const baseOpts = {
     mockOnly: false,
     resendApiKey: c.env.RESEND_API_KEY || c.env.RESEND_TOKEN || c.env.RESEND || '',
