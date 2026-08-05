@@ -13,10 +13,10 @@ import { getInitializedDatabase } from './db/index.js';
 export async function runCleanup(env, ctx) {
   const DB = await getInitializedDatabase(env);
   const r2 = env.MAIL_EML;
-  const results = { mailboxes: 0, messages: 0, r2Objects: 0, errors: [] };
+  const results = { mailboxes: 0, messages: 0, r2Objects: 0, r2Total: 0, errors: [] };
 
   try {
-    // 1. 获取1天前的 messages 的 R2 object_key（mailbox 级联删除前必须先拿到）
+    // 1. 获取1天前的 messages 的 R2 object_key（必须在删除数据库记录前拿到）
     const { results: msgResults } = await DB.prepare(`
       SELECT m.r2_object_key
       FROM messages m
@@ -29,30 +29,52 @@ export async function runCleanup(env, ctx) {
     const r2Keys = (msgResults || [])
       .map(r => r.r2_object_key)
       .filter(Boolean);
+    results.r2Total = r2Keys.length;
 
-    // 2. 删除 R2 中的邮件文件
+    // 2. 批量删除 R2 中的邮件文件（每批50个并行删除，避免超时）
     if (r2 && r2Keys.length > 0) {
-      for (const key of r2Keys) {
-        try {
-          await r2.delete(key);
-          results.r2Objects++;
-        } catch (e) {
-          results.errors.push(`R2 delete ${key}: ${e.message}`);
+      const BATCH_SIZE = 50;
+      for (let i = 0; i < r2Keys.length; i += BATCH_SIZE) {
+        const batch = r2Keys.slice(i, i + BATCH_SIZE);
+        const deleteResults = await Promise.allSettled(
+          batch.map(key => r2.delete(key))
+        );
+        for (const r of deleteResults) {
+          if (r.status === 'fulfilled') {
+            results.r2Objects++;
+          } else {
+            results.errors.push(`R2 delete error: ${r.reason?.message || r.reason}`);
+          }
         }
       }
     }
 
-    // 3. 删除1天前的 mailboxes（外键级联会自动删除关联的 messages 和 user_mailboxes）
+    // 3. 先删除1天前的 messages（messages 表外键无 ON DELETE CASCADE，必须先删）
+    const oldMsgResult = await DB.prepare(`
+      DELETE FROM messages WHERE mailbox_id IN (
+        SELECT id FROM mailboxes WHERE created_at < datetime('now', '-1 day')
+      )
+    `).run();
+    results.messages = oldMsgResult.meta?.changes || 0;
+
+    // 4. 删除1天前的 user_mailboxes（虽然带 ON DELETE CASCADE，但 D1 有时不自动触发）
+    await DB.prepare(`
+      DELETE FROM user_mailboxes WHERE mailbox_id IN (
+        SELECT id FROM mailboxes WHERE created_at < datetime('now', '-1 day')
+      )
+    `).run();
+
+    // 5. 删除1天前的 mailboxes
     const mbResult = await DB.prepare(`
       DELETE FROM mailboxes WHERE created_at < datetime('now', '-1 day')
     `).run();
     results.mailboxes = mbResult.meta?.changes || 0;
 
-    // 4. 清理已删除 mailbox 的孤立 messages（保险起见）
+    // 6. 清理孤立 messages（保险起见）
     const orphanResult = await DB.prepare(`
       DELETE FROM messages WHERE received_at < datetime('now', '-1 day')
     `).run();
-    results.messages = orphanResult.meta?.changes || 0;
+    results.messages += orphanResult.meta?.changes || 0;
 
     console.log('[cleanup]', JSON.stringify(results));
     return results;
